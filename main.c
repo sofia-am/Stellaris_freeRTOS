@@ -173,7 +173,6 @@ int main(void)
 
 	/* Create the semaphore used to change variable N */
 	vSemaphoreCreateBinary(xFilterSemaphore);
-	// xSemaphoreTake(xFilterSemaphore, 0);
 	/* Create the sempahore to wake up to uart handler*/
 	vSemaphoreCreateBinary(xUARTSemaphore);
 
@@ -192,14 +191,7 @@ int main(void)
 	/* Create the queue used to pass the temperature value to vFilterTask */
 	xSensorQueue = xQueueCreate(mainQUEUE_SIZE, sizeof(int));
 
-	/* Start the standard demo tasks. */
-	/* 	vStartIntegerMathTasks(tskIDLE_PRIORITY);
-		vStartPolledQueueTasks(mainQUEUE_POLL_PRIORITY);
-		vStartSemaphoreTasks(mainSEM_TEST_PRIORITY);
-		vStartBlockingQueueTasks(mainBLOCK_Q_PRIORITY);
-	 */
 	/* Start the tasks defined within the file. */
-	//	xTaskCreate( vCheckTask, "Check", configMINIMAL_STACK_SIZE, NULL, mainCHECK_TASK_PRIORITY, NULL );
 	xTaskCreate(vPrintTask, "Print", configMINIMAL_STACK_SIZE, NULL, mainDISPLAY_TASK_PRIORITY, NULL);
 	xTaskCreate(vSensorTask, "Sensor", configMINIMAL_STACK_SIZE, NULL, mainSENSOR_TASK_PRIORITY, NULL);
 	xTaskCreate(vFilterTask, "Filter", configMINIMAL_STACK_SIZE, NULL, mainFILTER_TASK_PRIORITY, NULL);
@@ -283,23 +275,17 @@ static void vSensorTask(void *pvParameters)
 	{
 		/* Perform this check every mainSENSOR_DELAY milliseconds. */
 		vTaskDelayUntil(&xLastExecutionTime, mainSENSOR_DELAY);
-
 		temperature = (temperature == 100) ? 0 : temperature + 1;
+		OSRAMClear();		
+		OSRAMStringDraw("temp", 0, 0); 
 
-		if (xQueueSend(xSensorQueue, &temperature, 0) != pdPASS)
+		if (xQueueSend(xSensorQueue, &temperature, mainCHECK_DELAY) != pdPASS)
 		{
 			OSRAMClear();
 			OSRAMStringDraw("QUEUE FULL", 0, 0);
 			while (true)
 				;
-		} /*
-		 if (xQueueOverwrite(xSensorQueue, temperature) != pdPASS)
-		 {
-			 OSRAMClear();
-			 OSRAMStringDraw("FAIL FILTER", 0, 0);
-			 while (true)
-				 ;
-		 } */
+		}
 	}
 }
 /*-----------------------------------------------------------*/
@@ -355,7 +341,7 @@ static void vFilterTask(void *pvParameters)
 			}
 
 			int8_t average = accum / N;
-			if (xQueueSend(xPrintQueue, &average, 0) != pdPASS)
+			if (xQueueSend(xPrintQueue, &average, mainCHECK_DELAY) != pdPASS)
 			{
 				OSRAMClear();
 				OSRAMStringDraw("FILTER FAIL", 0, 0);
@@ -405,6 +391,7 @@ void vUART_ISR(void)
 	xSemaphoreGiveFromISR(xUARTSemaphore, &xHigherPriorityTaskWoken);
 }
 
+/* The UART interrupt handler is triggered whenever new data is received, allowing your program to receive and process data in real-time without stopping or blocking. */
 void vUARTIntHandler(void)
 {
 	volatile char uartBuffer[UART_BUFFER_SIZE];
@@ -448,33 +435,6 @@ void vUARTIntHandler(void)
 		}
 	}
 }
-/*-----------------------------------------------------------*/
-/*
-static void vUARTIntHandler(void)
-{
-	TickType_t xLastExecutionTime = xTaskGetTickCount();
-
-	for (;;)
-	{
-		vTaskDelayUntil(&xLastExecutionTime, mainFILTER_TIMEOUT);
-
-		while (xSemaphoreTake(xUARTSemaphore, mainUART_TIMEOUT) == pdFAIL) // xSemaphoreTake(xNFilterSemaphore, 5000) == pdFAIL ||
-			;
-		OSRAMStringDraw("UART H", 0, 0);
-
-		char newN[UART_BUFFER_SIZE];
-		for (uint8_t i = 0; i < UART_BUFFER_SIZE; i++)
-		{
-			long res = UARTCharNonBlockingGet(UART0_BASE);
-			if (res == -1)
-				break;
-			else
-				N = res - 48;
-		}
-	}
-} */
-/*
-The UART interrupt handler is triggered whenever new data is received, allowing your program to receive and process data in real-time without stopping or blocking.*/
 
 /*-----------------------------------------------------------*/
 
@@ -503,9 +463,7 @@ static void vPrintTask(void *pvParameters)
 
 void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
 {
-	/* This function will get called if a task overflows its stack.   If the
-	parameters are corrupt then inspect pxCurrentTCB to find which was the
-	offending task. */
+	/* This function will get called if a task overflows its stack.   If the parameters are corrupt then inspect pxCurrentTCB to find which was the	offending task. */
 	OSRAMClear();
 	OSRAMStringDraw("OVERFLOW", 0, 0);
 	for (;;)
