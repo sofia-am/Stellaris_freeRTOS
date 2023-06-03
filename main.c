@@ -76,6 +76,11 @@
 #include "semtest.h"
 #include "BlockQ.h"
 
+#define mainQUEUE_TIMEOUT 3000
+#define mainFILTER_TIMEOUT 1000
+#define mainLCD_TIMEOUT 1000
+#define mainUART_TIMEOUT 3000
+
 /* Delay between cycles of the 'check' task. */
 #define mainCHECK_DELAY ((TickType_t)5000 / portTICK_PERIOD_MS)
 
@@ -88,18 +93,18 @@ efficient. */
 #define mainFIFO_SET (0x10)
 
 /* Demo task priorities. */
-#define mainQUEUE_POLL_PRIORITY (tskIDLE_PRIORITY + 2)
-#define mainCHECK_TASK_PRIORITY (tskIDLE_PRIORITY + 3)
-#define mainSEM_TEST_PRIORITY (tskIDLE_PRIORITY + 1)
-#define mainBLOCK_Q_PRIORITY (tskIDLE_PRIORITY + 2)
-
-/* Demo board specifics. */
-#define mainPUSH_BUTTON GPIO_PIN_4
+#define mainSENSOR_TASK_PRIORITY (tskIDLE_PRIORITY + 3)
+#define mainFILTER_TASK_PRIORITY (tskIDLE_PRIORITY + 2)
+#define mainDISPLAY_TASK_PRIORITY (tskIDLE_PRIORITY + 2)
+#define mainUART_TASK_PRIORITY (tskIDLE_PRIORITY + 4)
 
 /* Misc. */
 #define mainQUEUE_SIZE (3)
-#define mainDEBOUNCE_DELAY ((TickType_t)150 / portTICK_PERIOD_MS)
 #define mainNO_DELAY ((TickType_t)0)
+
+#define MAX_N 15
+
+#define UART_BUFFER_SIZE 5
 /*
  * Configure the processor and peripherals for this demo.
  */
@@ -108,7 +113,7 @@ static void prvSetupHardware(void);
 /*
  * The 'check' task, as described at the top of this file.
  */
-// static void vCheckTask( void *pvParameters );
+static void vCheckTask(void *pvParameters);
 
 /*
  * The task that is woken by the ISR that processes GPIO interrupts originating
@@ -122,22 +127,42 @@ static void vButtonHandlerTask(void *pvParameters);
 static void vPrintTask(void *pvParameter);
 
 /*
+ * The task that is woken by the ISR that processes UART interrupts.
+ */
+static void vUARTIntHandler(void);
+
+/*
  * The task that simulates a sensor.
  */
 static void vSensorTask(void *pvParameters);
+/*
+ * The task that simulates a sensor.
+ */
+static void vFilterTask(void *pvParameters);
 
 /* String that is transmitted on the UART. */
 static char *cMessage = "Task woken by button interrupt! --- ";
 static volatile char *pcNextChar;
 
-int temperature = 0;
+/* Number of samples taken by the filter */
+static uint8_t N;
+
+static int temperature = 0;
+
+int8_t sampledData[MAX_N];
 
 /* The semaphore used to wake the button handler task from within the GPIO
 interrupt handler. */
-SemaphoreHandle_t xButtonSemaphore;
+SemaphoreHandle_t xUARTSemaphore;
+
+/* The semaphore used to change the value of the N parameter */
+SemaphoreHandle_t xFilterSemaphore;
 
 /* The queue used to send strings to the print task for display on the LCD. */
 QueueHandle_t xPrintQueue;
+
+/* The queue used to send temperature data to the filter. */
+QueueHandle_t xSensorQueue;
 
 /*-----------------------------------------------------------*/
 
@@ -146,102 +171,70 @@ int main(void)
 	/* Configure the clocks, UART and GPIO. */
 	prvSetupHardware();
 
-	/* Create the semaphore used to wake the button handler task from the GPIO
-	ISR. */
-	vSemaphoreCreateBinary(xButtonSemaphore);
-	xSemaphoreTake(xButtonSemaphore, 0);
+	/* Create the semaphore used to change variable N */
+	vSemaphoreCreateBinary(xFilterSemaphore);
+	// xSemaphoreTake(xFilterSemaphore, 0);
+	/* Create the sempahore to wake up to uart handler*/
+	vSemaphoreCreateBinary(xUARTSemaphore);
+
+	// returns pdFALSE if xBlockTime expired without the semaphore becoming available.
+	if (xSemaphoreTake(xUARTSemaphore, mainUART_TIMEOUT) == pdFAIL)
+	{
+		OSRAMClear();
+		OSRAMStringDraw("FAIL UART SEM", 0, 0);
+		while (true)
+			;
+	}
 
 	/* Create the queue used to pass message to vPrintTask. */
 	xPrintQueue = xQueueCreate(mainQUEUE_SIZE, sizeof(char *));
 
-	/* Start the standard demo tasks. */
-	vStartIntegerMathTasks(tskIDLE_PRIORITY);
-	vStartPolledQueueTasks(mainQUEUE_POLL_PRIORITY);
-	vStartSemaphoreTasks(mainSEM_TEST_PRIORITY);
-	vStartBlockingQueueTasks(mainBLOCK_Q_PRIORITY);
+	/* Create the queue used to pass the temperature value to vFilterTask */
+	xSensorQueue = xQueueCreate(mainQUEUE_SIZE, sizeof(int));
 
+	/* Start the standard demo tasks. */
+	/* 	vStartIntegerMathTasks(tskIDLE_PRIORITY);
+		vStartPolledQueueTasks(mainQUEUE_POLL_PRIORITY);
+		vStartSemaphoreTasks(mainSEM_TEST_PRIORITY);
+		vStartBlockingQueueTasks(mainBLOCK_Q_PRIORITY);
+	 */
 	/* Start the tasks defined within the file. */
 	//	xTaskCreate( vCheckTask, "Check", configMINIMAL_STACK_SIZE, NULL, mainCHECK_TASK_PRIORITY, NULL );
-	xTaskCreate(vButtonHandlerTask, "Status", configMINIMAL_STACK_SIZE, NULL, mainCHECK_TASK_PRIORITY + 1, NULL);
-	xTaskCreate(vPrintTask, "Print", configMINIMAL_STACK_SIZE, NULL, mainCHECK_TASK_PRIORITY - 1, NULL);
-	xTaskCreate(vSensorTask, "Sensor", configMINIMAL_STACK_SIZE, NULL, mainCHECK_TASK_PRIORITY - 1, NULL);
+	xTaskCreate(vPrintTask, "Print", configMINIMAL_STACK_SIZE, NULL, mainDISPLAY_TASK_PRIORITY, NULL);
+	xTaskCreate(vSensorTask, "Sensor", configMINIMAL_STACK_SIZE, NULL, mainSENSOR_TASK_PRIORITY, NULL);
+	xTaskCreate(vFilterTask, "Filter", configMINIMAL_STACK_SIZE, NULL, mainFILTER_TASK_PRIORITY, NULL);
+	xTaskCreate(vUARTIntHandler, "UARTHandler", configMINIMAL_STACK_SIZE, NULL, mainUART_TASK_PRIORITY, NULL);
 
 	/* Start the scheduler. */
 	vTaskStartScheduler();
 
 	/* Will only get here if there was insufficient heap to start the
 	scheduler. */
+	OSRAMClear();
+	OSRAMStringDraw("FAIL SCHEDULER START", 0, 0);
 
 	return 0;
 }
 /*-----------------------------------------------------------*/
 
-// static void vCheckTask( void *pvParameters )
-// {
-// portBASE_TYPE xErrorOccurred = pdFALSE;
-// TickType_t xLastExecutionTime;
-// const char *pcPassMessage = "PASS";
-// const char *pcFailMessage = "FAIL";
-
-// 	/* Initialise xLastExecutionTime so the first call to vTaskDelayUntil()
-// 	works correctly. */
-// 	xLastExecutionTime = xTaskGetTickCount();
-
-// 	for( ;; )
-// 	{
-// 		/* Perform this check every mainCHECK_DELAY milliseconds. */
-// 		vTaskDelayUntil( &xLastExecutionTime, mainCHECK_DELAY );
-
-// 		/* Has an error been found in any task? */
-
-// 		if( xAreIntegerMathsTaskStillRunning() != pdTRUE )
-// 		{
-// 			xErrorOccurred = pdTRUE;
-// 		}
-
-// 		if( xArePollingQueuesStillRunning() != pdTRUE )
-// 		{
-// 			xErrorOccurred = pdTRUE;
-// 		}
-
-// 		if( xAreSemaphoreTasksStillRunning() != pdTRUE )
-// 		{
-// 			xErrorOccurred = pdTRUE;
-// 		}
-
-// 		if( xAreBlockingQueuesStillRunning() != pdTRUE )
-// 		{
-// 			xErrorOccurred = pdTRUE;
-// 		}
-
-// 		/* Send either a pass or fail message.  If an error is found it is
-// 		never cleared again.  We do not write directly to the LCD, but instead
-// 		queue a message for display by the print task. */
-// 		if( xErrorOccurred == pdTRUE )
-// 		{
-// 			xQueueSend( xPrintQueue, &pcFailMessage, portMAX_DELAY );
-// 		}
-// 		else
-// 		{
-// 			xQueueSend( xPrintQueue, &pcPassMessage, portMAX_DELAY );
-// 		}
-// 	}
-// }
-
-/*-----------------------------------------------------------*/
-
-static void vSensorTask(void *pvParameters)
+static void vCheckTask(void *pvParameters)
 {
-	TickType_t xLastExecutionTime;
 	portBASE_TYPE xErrorOccurred = pdFALSE;
+	TickType_t xLastExecutionTime;
+	const char *pcPassMessage = "PASS";
+	const char *pcFailMessage = "FAIL";
 
 	/* Initialise xLastExecutionTime so the first call to vTaskDelayUntil()
 	works correctly. */
 	xLastExecutionTime = xTaskGetTickCount();
-	temperature = (temperature == 100) ? 0 : temperature + 1;
 
 	for (;;)
 	{
+		/* Perform this check every mainCHECK_DELAY milliseconds. */
+		vTaskDelayUntil(&xLastExecutionTime, mainCHECK_DELAY);
+
+		/* Has an error been found in any task? */
+
 		if (xAreIntegerMathsTaskStillRunning() != pdTRUE)
 		{
 			xErrorOccurred = pdTRUE;
@@ -261,28 +254,124 @@ static void vSensorTask(void *pvParameters)
 		{
 			xErrorOccurred = pdTRUE;
 		}
-		/* Perform this check every mainSENSOR_DELAY milliseconds. */
-		vTaskDelayUntil(&xLastExecutionTime, mainCHECK_DELAY);
 
-		/* We do not write directly to the LCD, but instead
+		/* Send either a pass or fail message.  If an error is found it is
+		never cleared again.  We do not write directly to the LCD, but instead
 		queue a message for display by the print task. */
-		if (!xErrorOccurred == pdTRUE)
-			xQueueSend(xPrintQueue, "hola", portMAX_DELAY);
+		if (xErrorOccurred == pdTRUE)
+		{
+			xQueueSend(xPrintQueue, &pcFailMessage, portMAX_DELAY);
+		}
+		else
+		{
+			xQueueSend(xPrintQueue, &pcPassMessage, portMAX_DELAY);
+		}
 	}
 }
 
+/*-----------------------------------------------------------*/
+
+static void vSensorTask(void *pvParameters)
+{
+	TickType_t xLastExecutionTime;
+	portBASE_TYPE xErrorOccurred = pdFALSE;
+
+	/* Initialise xLastExecutionTime so the first call to vTaskDelayUntil()
+	works correctly. */
+	xLastExecutionTime = xTaskGetTickCount();
+	for (;;)
+	{
+		/* Perform this check every mainSENSOR_DELAY milliseconds. */
+		vTaskDelayUntil(&xLastExecutionTime, mainSENSOR_DELAY);
+
+		temperature = (temperature == 100) ? 0 : temperature + 1;
+
+		if (xQueueSend(xSensorQueue, &temperature, 0) != pdPASS)
+		{
+			OSRAMClear();
+			OSRAMStringDraw("QUEUE FULL", 0, 0);
+			while (true)
+				;
+		} /*
+		 if (xQueueOverwrite(xSensorQueue, temperature) != pdPASS)
+		 {
+			 OSRAMClear();
+			 OSRAMStringDraw("FAIL FILTER", 0, 0);
+			 while (true)
+				 ;
+		 } */
+	}
+}
+/*-----------------------------------------------------------*/
+
+static void vFilterTask(void *pvParameters)
+{
+	static uint8_t dataCounter = 0;
+	TickType_t xLastExecutionTime = xTaskGetTickCount();
+	int8_t startIndex; // variable to store the start index for the accumulator loop
+	int8_t i;
+
+	for (;;)
+	{
+		vTaskDelayUntil(&xLastExecutionTime, mainFILTER_TIMEOUT);
+
+		/* if the queue is empty or the semaphore couldn't be taken */
+		while (uxQueueMessagesWaiting(xSensorQueue) == 0 || xSemaphoreTake(xFilterSemaphore, mainFILTER_TIMEOUT) == pdFAIL)
+			;
+
+		int8_t sampleValue;
+		if (xQueueReceive(xSensorQueue, &sampleValue, 0) == pdPASS)
+		{
+			int16_t accum = 0;
+
+			// the first time we'll take the average on the amount of samples that we have or the last N samples
+			if (dataCounter != MAX_N)
+			{
+				sampledData[dataCounter] = sampleValue;
+				dataCounter++;
+				startIndex = dataCounter - N;
+				startIndex = startIndex <= 0 ? 0 : startIndex; /* if we have more samples than N, we take the average on the last N samples
+				else if we have less than N samples, we take the average on all the samples we have
+				*/
+				for (i = startIndex; i < dataCounter; i++)
+				{
+					accum += sampledData[i];
+				}
+			}
+			// after we fill the whole array we'll take the average on the last N samples after we shift the array
+			else
+			{
+				for (i = 1; i < MAX_N; i++) // here we shift the array to the left (we discard the oldest value)
+				{
+					sampledData[i - 1] = sampledData[i];
+				}
+
+				sampledData[MAX_N - 1] = sampleValue;
+
+				for (i = 0; i < MAX_N; i++) // here we take the average on the last N samples
+				{
+					accum += sampledData[i];
+				}
+			}
+
+			int8_t average = accum / N;
+			if (xQueueSend(xPrintQueue, &average, 0) != pdPASS)
+			{
+				OSRAMClear();
+				OSRAMStringDraw("FILTER FAIL", 0, 0);
+				while (true)
+					;
+			}
+		}
+		xSemaphoreGive(xFilterSemaphore);
+	}
+}
+
+/*-----------------------------------------------------------*/
 static void prvSetupHardware(void)
 {
 	/* Setup the PLL. */
 	SysCtlClockSet(SYSCTL_SYSDIV_10 | SYSCTL_USE_PLL | SYSCTL_OSC_MAIN | SYSCTL_XTAL_6MHZ);
-
-	/* Setup the push button. */
-	SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOC);
-	GPIODirModeSet(GPIO_PORTC_BASE, mainPUSH_BUTTON, GPIO_DIR_MODE_IN);
-	GPIOIntTypeSet(GPIO_PORTC_BASE, mainPUSH_BUTTON, GPIO_FALLING_EDGE);
-	IntPrioritySet(INT_GPIOC, configKERNEL_INTERRUPT_PRIORITY);
-	GPIOPinIntEnable(GPIO_PORTC_BASE, mainPUSH_BUTTON);
-	IntEnable(INT_GPIOC);
 
 	/* Enable the UART.  */
 	SysCtlPeripheralEnable(SYSCTL_PERIPH_UART0);
@@ -290,17 +379,13 @@ static void prvSetupHardware(void)
 
 	/* Set GPIO A0 and A1 as peripheral function.  They are used to output the
 	UART signals. */
-	GPIODirModeSet(GPIO_PORTA_BASE, GPIO_PIN_0 | GPIO_PIN_1, GPIO_DIR_MODE_HW);
+	GPIODirModeSet(GPIO_PORTA_BASE, GPIO_PIN_0, GPIO_DIR_MODE_HW);
 
 	/* Configure the UART for 8-N-1 operation. */
 	UARTConfigSet(UART0_BASE, mainBAUD_RATE, UART_CONFIG_WLEN_8 | UART_CONFIG_PAR_NONE | UART_CONFIG_STOP_ONE);
 
-	/* We don't want to use the fifo.  This is for test purposes to generate
-	as many interrupts as possible. */
-	HWREG(UART0_BASE + UART_O_LCR_H) &= ~mainFIFO_SET;
-
-	/* Enable Tx interrupts. */
-	HWREG(UART0_BASE + UART_O_IM) |= UART_INT_TX;
+	/* Enable Rx interrupts. */
+	HWREG(UART0_BASE + UART_O_IM) |= UART_INT_RX;
 	IntPrioritySet(INT_UART0, configKERNEL_INTERRUPT_PRIORITY);
 	IntEnable(INT_UART0);
 
@@ -311,95 +396,108 @@ static void prvSetupHardware(void)
 }
 /*-----------------------------------------------------------*/
 
-static void vButtonHandlerTask(void *pvParameters)
+void vUART_ISR(void)
 {
-	const char *pcInterruptMessage = "Int";
+	portBASE_TYPE xHigherPriorityTaskWoken = pdFALSE;
+	unsigned long ulStatus = UARTIntStatus(UART0_BASE, pdTRUE);
+	UARTIntClear(UART0_BASE, ulStatus);
+
+	xSemaphoreGiveFromISR(xUARTSemaphore, &xHigherPriorityTaskWoken);
+}
+
+void vUARTIntHandler(void)
+{
+	volatile char uartBuffer[UART_BUFFER_SIZE];
+	volatile uint8_t uartBufferIndex = 0;
 
 	for (;;)
 	{
-		/* Wait for a GPIO interrupt to wake this task. */
-		while (xSemaphoreTake(xButtonSemaphore, portMAX_DELAY) != pdPASS)
-			;
 
-		/* Start the Tx of the message on the UART. */
-		UARTIntDisable(UART0_BASE, UART_INT_TX);
+		while(xSemaphoreTake(xUARTSemaphore, portMAX_DELAY) == pdFALSE);
+
+		while (UARTCharsAvail(UART0_BASE))
 		{
-			pcNextChar = cMessage;
+			// Returns the character read from the specified port, cast as a long.
+			long receivedChar = UARTCharGet(UART0_BASE);
 
-			/* Send the first character. */
-			if (!(HWREG(UART0_BASE + UART_O_FR) & UART_FR_TXFF))
+			if (receivedChar == '\n' || receivedChar == '\r')
 			{
-				HWREG(UART0_BASE + UART_O_DR) = *pcNextChar;
+				// Process the received N value
+				uartBuffer[uartBufferIndex] = '\0'; // Null-terminate the buffer
+				uint8_t newN = atoi(uartBuffer);	// Convert the buffer to an integer
+
+				// Update the N value
+				if (newN > 0 && newN <= MAX_N)
+				{
+					N = newN;
+					xSemaphoreGive(xFilterSemaphore);
+				}
+
+				// Clear the buffer index
+				uartBufferIndex = 0;
+			}
+			else if (uartBufferIndex < UART_BUFFER_SIZE - 1)
+			{
+				// Add the received character to the buffer
+				uartBuffer[uartBufferIndex] = receivedChar;
+				uartBufferIndex++;
 			}
 
-			pcNextChar++;
+			OSRAMStringDraw("UART H", 0, 0);
+
 		}
-		UARTIntEnable(UART0_BASE, UART_INT_TX);
-
-		/* Queue a message for the print task to display on the LCD. */
-		xQueueSend(xPrintQueue, &pcInterruptMessage, portMAX_DELAY);
-
-		/* Make sure we don't process bounces. */
-		vTaskDelay(mainDEBOUNCE_DELAY);
-		xSemaphoreTake(xButtonSemaphore, mainNO_DELAY);
 	}
 }
-
 /*-----------------------------------------------------------*/
-
-void vUART_ISR(void)
+/*
+static void vUARTIntHandler(void)
 {
-	unsigned long ulStatus;
+	TickType_t xLastExecutionTime = xTaskGetTickCount();
 
-	/* What caused the interrupt. */
-	ulStatus = UARTIntStatus(UART0_BASE, pdTRUE);
-
-	/* Clear the interrupt. */
-	UARTIntClear(UART0_BASE, ulStatus);
-
-	/* Was a Tx interrupt pending? */
-	if (ulStatus & UART_INT_TX)
+	for (;;)
 	{
-		/* Send the next character in the string.  We are not using the FIFO. */
-		if (*pcNextChar != 0)
+		vTaskDelayUntil(&xLastExecutionTime, mainFILTER_TIMEOUT);
+
+		while (xSemaphoreTake(xUARTSemaphore, mainUART_TIMEOUT) == pdFAIL) // xSemaphoreTake(xNFilterSemaphore, 5000) == pdFAIL ||
+			;
+		OSRAMStringDraw("UART H", 0, 0);
+
+		char newN[UART_BUFFER_SIZE];
+		for (uint8_t i = 0; i < UART_BUFFER_SIZE; i++)
 		{
-			if (!(HWREG(UART0_BASE + UART_O_FR) & UART_FR_TXFF))
-			{
-				HWREG(UART0_BASE + UART_O_DR) = *pcNextChar;
-			}
-			pcNextChar++;
+			long res = UARTCharNonBlockingGet(UART0_BASE);
+			if (res == -1)
+				break;
+			else
+				N = res - 48;
 		}
 	}
-}
-/*-----------------------------------------------------------*/
+} */
+/*
+The UART interrupt handler is triggered whenever new data is received, allowing your program to receive and process data in real-time without stopping or blocking.*/
 
-void vGPIO_ISR(void)
-{
-	portBASE_TYPE xHigherPriorityTaskWoken = pdFALSE;
-
-	/* Clear the interrupt. */
-	GPIOPinIntClear(GPIO_PORTC_BASE, mainPUSH_BUTTON);
-
-	/* Wake the button handler task. */
-	xSemaphoreGiveFromISR(xButtonSemaphore, &xHigherPriorityTaskWoken);
-
-	portEND_SWITCHING_ISR(xHigherPriorityTaskWoken);
-}
 /*-----------------------------------------------------------*/
 
 static void vPrintTask(void *pvParameters)
 {
-	char *pcMessage;
+	float fValue;
 	unsigned portBASE_TYPE uxLine = 0, uxRow = 0;
+	TickType_t xLastExecutionTime = xTaskGetTickCount();
 
 	for (;;)
 	{
-		/* Wait for a message to arrive. */
-		xQueueReceive(xPrintQueue, &pcMessage, portMAX_DELAY);
+		vTaskDelayUntil(&xLastExecutionTime, mainFILTER_TIMEOUT);
+		// OSRAMClear();
 
-		/* Write the message to the LCD. */
-		OSRAMClear();
-		OSRAMStringDraw(pcMessage, 0, 0);
+		/* Wait for a message to arrive. */
+		if (xQueueReceive(xPrintQueue, &fValue, mainLCD_TIMEOUT) == pdTRUE)
+		{
+			OSRAMStringDraw("Print OK", 1, 1);
+		}
+		else
+		{
+			OSRAMStringDraw("Print FAIL", 1, 1);
+		}
 	}
 }
 
@@ -408,6 +506,8 @@ void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
 	/* This function will get called if a task overflows its stack.   If the
 	parameters are corrupt then inspect pxCurrentTCB to find which was the
 	offending task. */
+	OSRAMClear();
+	OSRAMStringDraw("OVERFLOW", 0, 0);
 	for (;;)
 		;
 }
