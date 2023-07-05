@@ -276,9 +276,8 @@ static void vSensorTask(void *pvParameters)
 		/* Perform this check every mainSENSOR_DELAY milliseconds. */
 		vTaskDelayUntil(&xLastExecutionTime, mainSENSOR_DELAY);
 		temperature = (temperature == 100) ? 0 : temperature + 1;
-		OSRAMClear();		
-		OSRAMStringDraw("temp", 0, 0); 
-
+		OSRAMClear();
+		OSRAMStringDraw("temp", 0, 0);
 		if (xQueueSend(xSensorQueue, &temperature, mainCHECK_DELAY) != pdPASS)
 		{
 			OSRAMClear();
@@ -308,6 +307,9 @@ static void vFilterTask(void *pvParameters)
 		int8_t sampleValue;
 		if (xQueueReceive(xSensorQueue, &sampleValue, 0) == pdPASS)
 		{
+			OSRAMClear();
+			OSRAMStringDraw("filter", 0, 0);
+
 			int16_t accum = 0;
 
 			// the first time we'll take the average on the amount of samples that we have or the last N samples
@@ -367,7 +369,7 @@ static void prvSetupHardware(void)
 	UART signals. */
 	GPIODirModeSet(GPIO_PORTA_BASE, GPIO_PIN_0, GPIO_DIR_MODE_HW);
 
-	/* Configure the UART for 8-N-1 operation. */
+	/* Configure the UART for 19200 - 8 bits - no parity - 1 bit stop operation. */
 	UARTConfigSet(UART0_BASE, mainBAUD_RATE, UART_CONFIG_WLEN_8 | UART_CONFIG_PAR_NONE | UART_CONFIG_STOP_ONE);
 
 	/* Enable Rx interrupts. */
@@ -391,47 +393,44 @@ void vUART_ISR(void)
 	xSemaphoreGiveFromISR(xUARTSemaphore, &xHigherPriorityTaskWoken);
 }
 
-/* The UART interrupt handler is triggered whenever new data is received, allowing your program to receive and process data in real-time without stopping or blocking. */
+/* The UART interrupt handler is triggered whenever new data is received, allowing the program to receive and process data in real-time without stopping or blocking. */
 void vUARTIntHandler(void)
-{
-	volatile char uartBuffer[UART_BUFFER_SIZE];
-	volatile uint8_t uartBufferIndex = 0;
+{	
+	long receivedChar; 
+	uint8_t newN;
 
 	for (;;)
 	{
 
-		while(xSemaphoreTake(xUARTSemaphore, portMAX_DELAY) == pdFALSE);
+		while (xSemaphoreTake(xUARTSemaphore, portMAX_DELAY) == pdFALSE)
+			;
 
+		// Returns true if there is data in the receive FIFO or false if there is no data in the receive FIFO.
 		while (UARTCharsAvail(UART0_BASE))
 		{
 			// Returns the character read from the specified port, cast as a long.
-			long receivedChar = UARTCharGet(UART0_BASE);
+			receivedChar = UARTCharGet(UART0_BASE);
 
-			if (receivedChar == '\n' || receivedChar == '\r')
+			if (receivedChar == '+')
 			{
-				// Process the received N value
-				uartBuffer[uartBufferIndex] = '\0'; // Null-terminate the buffer
-				uint8_t newN = atoi(uartBuffer);	// Convert the buffer to an integer
-
 				// Update the N value
-				if (newN > 0 && newN <= MAX_N)
-				{
+				newN = N + 1;
+				if(newN <= MAX_N){
 					N = newN;
 					xSemaphoreGive(xFilterSemaphore);
 				}
-
-				// Clear the buffer index
-				uartBufferIndex = 0;
 			}
-			else if (uartBufferIndex < UART_BUFFER_SIZE - 1)
+			else if (receivedChar == '-')
 			{
-				// Add the received character to the buffer
-				uartBuffer[uartBufferIndex] = receivedChar;
-				uartBufferIndex++;
+				// Update the N value
+				newN = N - 1;
+				if(newN > 0){
+					N = newN;
+					xSemaphoreGive(xFilterSemaphore);
+				}
 			}
 
 			OSRAMStringDraw("UART H", 0, 0);
-
 		}
 	}
 }
