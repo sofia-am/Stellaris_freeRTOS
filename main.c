@@ -103,8 +103,7 @@ efficient. */
 #define mainNO_DELAY ((TickType_t)0)
 
 #define MAX_N 15
-
-#define UART_BUFFER_SIZE 5
+#define RAND_MAX 5
 /*
  * Configure the processor and peripherals for this demo.
  */
@@ -147,7 +146,7 @@ static volatile char *pcNextChar;
 /* Number of samples taken by the filter */
 static uint8_t N;
 
-static int temperature = 0;
+static int temperature = 20;
 
 int8_t sampledData[MAX_N];
 
@@ -275,7 +274,7 @@ static void vSensorTask(void *pvParameters)
 	{
 		/* Perform this check every mainSENSOR_DELAY milliseconds. */
 		vTaskDelayUntil(&xLastExecutionTime, mainSENSOR_DELAY);
-		temperature = (temperature == 100) ? 0 : temperature + 1;
+		temperature += customRand();
 		OSRAMClear();
 		OSRAMStringDraw("temp", 0, 0);
 		if (xQueueSend(xSensorQueue, &temperature, mainCHECK_DELAY) != pdPASS)
@@ -467,4 +466,20 @@ void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
 	OSRAMStringDraw("OVERFLOW", 0, 0);
 	for (;;)
 		;
+}
+
+// Function to generate a pseudo-random number between 0 and RAND_MAX
+int customRand(void)
+{
+	uint32_t seed = xTaskGetTickCount();
+    const uint32_t a = 1103515245;  // Multiplier
+    const uint32_t c = 12345;       // Increment
+    const uint32_t m = 2147483648;  // Modulus (2^31)
+
+    // Update the seed using the LCG formula: Xn+1 = (a * Xn + c) % m
+    seed = (a * seed + c) % m;
+
+    // Return the random number between 0 and RAND_MAX
+   	int random = (int)(seed % (2 * RAND_MAX + 1)) - RAND_MAX;
+	return random;	
 }
