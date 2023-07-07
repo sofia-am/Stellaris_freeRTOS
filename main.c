@@ -104,6 +104,7 @@ efficient. */
 
 #define MAX_N 15
 #define RAND_MAX 5
+#define AXIS_START 15
 /*
  * Configure the processor and peripherals for this demo.
  */
@@ -139,12 +140,16 @@ static void vSensorTask(void *pvParameters);
  */
 static void vFilterTask(void *pvParameters);
 
+void intToAscii(int num, char* buffer, int bufferSize);
+
+int customRand(void);
+
 /* String that is transmitted on the UART. */
 static char *cMessage = "Task woken by button interrupt! --- ";
 static volatile char *pcNextChar;
 
 /* Number of samples taken by the filter */
-static uint8_t N;
+static uint8_t N = 1;
 
 static int temperature = 20;
 
@@ -185,7 +190,7 @@ int main(void)
 	}
 
 	/* Create the queue used to pass message to vPrintTask. */
-	xPrintQueue = xQueueCreate(mainQUEUE_SIZE, sizeof(char *));
+	xPrintQueue = xQueueCreate(mainQUEUE_SIZE, sizeof(uint8_t));
 
 	/* Create the queue used to pass the temperature value to vFilterTask */
 	xSensorQueue = xQueueCreate(mainQUEUE_SIZE, sizeof(int));
@@ -265,6 +270,7 @@ static void vCheckTask(void *pvParameters)
 static void vSensorTask(void *pvParameters)
 {
 	TickType_t xLastExecutionTime;
+	int randomTemp = 0;
 	portBASE_TYPE xErrorOccurred = pdFALSE;
 
 	/* Initialise xLastExecutionTime so the first call to vTaskDelayUntil()
@@ -274,9 +280,10 @@ static void vSensorTask(void *pvParameters)
 	{
 		/* Perform this check every mainSENSOR_DELAY milliseconds. */
 		vTaskDelayUntil(&xLastExecutionTime, mainSENSOR_DELAY);
-		temperature += customRand();
+		randomTemp = customRand();
+		temperature += randomTemp;/* 
 		OSRAMClear();
-		OSRAMStringDraw("temp", 0, 0);
+		OSRAMStringDraw("temp", 0, 0); */
 		if (xQueueSend(xSensorQueue, &temperature, mainCHECK_DELAY) != pdPASS)
 		{
 			OSRAMClear();
@@ -304,11 +311,10 @@ static void vFilterTask(void *pvParameters)
 			;
 
 		int8_t sampleValue;
-		if (xQueueReceive(xSensorQueue, &sampleValue, 0) == pdPASS)
-		{
+		if (xQueueReceive(xSensorQueue, &sampleValue, 0) == pdTRUE)
+		{/* 
 			OSRAMClear();
-			OSRAMStringDraw("filter", 0, 0);
-
+			OSRAMStringDraw("filter", 0, 0); */
 			int16_t accum = 0;
 
 			// the first time we'll take the average on the amount of samples that we have or the last N samples
@@ -335,7 +341,7 @@ static void vFilterTask(void *pvParameters)
 
 				sampledData[MAX_N - 1] = sampleValue;
 
-				for (i = 0; i < MAX_N; i++) // here we take the average on the last N samples
+				for (i = MAX_N - N; i < N; i++) // here we take the average on the last N samples
 				{
 					accum += sampledData[i];
 				}
@@ -429,28 +435,43 @@ void vUARTIntHandler(void)
 				}
 			}
 
-			OSRAMStringDraw("UART H", 0, 0);
+			// OSRAMStringDraw("UART H", 0, 0);
 		}
 	}
 }
-
 /*-----------------------------------------------------------*/
 
 static void vPrintTask(void *pvParameters)
 {
-	float fValue;
+	uint8_t averageValue;
+
 	unsigned portBASE_TYPE uxLine = 0, uxRow = 0;
 	TickType_t xLastExecutionTime = xTaskGetTickCount();
+	char *N_ascii[5];
 
 	for (;;)
 	{
 		vTaskDelayUntil(&xLastExecutionTime, mainFILTER_TIMEOUT);
-		// OSRAMClear();
+		OSRAMClear();
 
 		/* Wait for a message to arrive. */
-		if (xQueueReceive(xPrintQueue, &fValue, mainLCD_TIMEOUT) == pdTRUE)
+		if (xQueueReceive(xPrintQueue, &averageValue, mainLCD_TIMEOUT) == pdTRUE)
 		{
-			OSRAMStringDraw("Print OK", 1, 1);
+			// OSRAMStringDraw("Print OK", 1, 1);
+		intToAscii(N, N_ascii, 5);
+		OSRAMClear();
+		OSRAMStringDraw("N= ", 0, 0);
+		OSRAMStringDraw(N_ascii, 0, 1);
+		// Display the image on the OLED display
+		unsigned char yaxis[] = {0xFF,0xFF};
+		OSRAMImageDraw(yaxis, AXIS_START, 0, 1, 2);
+
+		// Eje X
+		uint8_t xaxis[] = {0x00, 0x80};
+		for (int i = AXIS_START+1; i < 96; i++) {
+			OSRAMImageDraw(xaxis, i, 0, 1, 2);
+		}	
+
 		}
 		else
 		{
@@ -482,4 +503,32 @@ int customRand(void)
     // Return the random number between 0 and RAND_MAX
    	int random = (int)(seed % (2 * RAND_MAX + 1)) - RAND_MAX;
 	return random;	
+}
+
+void intToAscii(int num, char* buffer, int bufferSize) {
+    if (num == 0) {
+        buffer[0] = '0';
+        buffer[1] = '\0';
+        return;
+    }
+
+    int i = 0;
+    // Build the ASCII string in reverse order
+    while (num > 0 && i < bufferSize - 1) {
+        int digit = num % 10;
+        buffer[i] = '0' + digit;
+        num /= 10;
+        i++;
+    }
+
+    // Add the null terminator
+    buffer[i] = '\0';
+
+    // Reverse the string
+    int length = i;
+    for (int j = 0; j < length / 2; j++) {
+        char temp = buffer[j];
+        buffer[j] = buffer[length - j - 1];
+        buffer[length - j - 1] = temp;
+    }
 }
