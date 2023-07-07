@@ -140,9 +140,11 @@ static void vSensorTask(void *pvParameters);
  */
 static void vFilterTask(void *pvParameters);
 
-void intToAscii(int num, char* buffer, int bufferSize);
+void intToAscii(int num, char *buffer, int bufferSize);
 
 int customRand(void);
+
+void displayTemperatureGraph(int temperature, uint8_t graph[2]);
 
 /* String that is transmitted on the UART. */
 static char *cMessage = "Task woken by button interrupt! --- ";
@@ -281,9 +283,9 @@ static void vSensorTask(void *pvParameters)
 		/* Perform this check every mainSENSOR_DELAY milliseconds. */
 		vTaskDelayUntil(&xLastExecutionTime, mainSENSOR_DELAY);
 		randomTemp = customRand();
-		temperature += randomTemp;/* 
-		OSRAMClear();
-		OSRAMStringDraw("temp", 0, 0); */
+		temperature += randomTemp; /*
+		 OSRAMClear();
+		 OSRAMStringDraw("temp", 0, 0); */
 		if (xQueueSend(xSensorQueue, &temperature, mainCHECK_DELAY) != pdPASS)
 		{
 			OSRAMClear();
@@ -312,9 +314,9 @@ static void vFilterTask(void *pvParameters)
 
 		int8_t sampleValue;
 		if (xQueueReceive(xSensorQueue, &sampleValue, 0) == pdTRUE)
-		{/* 
-			OSRAMClear();
-			OSRAMStringDraw("filter", 0, 0); */
+		{ /*
+			 OSRAMClear();
+			 OSRAMStringDraw("filter", 0, 0); */
 			int16_t accum = 0;
 
 			// the first time we'll take the average on the amount of samples that we have or the last N samples
@@ -400,8 +402,8 @@ void vUART_ISR(void)
 
 /* The UART interrupt handler is triggered whenever new data is received, allowing the program to receive and process data in real-time without stopping or blocking. */
 void vUARTIntHandler(void)
-{	
-	long receivedChar; 
+{
+	long receivedChar;
 	uint8_t newN;
 
 	for (;;)
@@ -420,7 +422,8 @@ void vUARTIntHandler(void)
 			{
 				// Update the N value
 				newN = N + 1;
-				if(newN <= MAX_N){
+				if (newN <= MAX_N)
+				{
 					N = newN;
 					xSemaphoreGive(xFilterSemaphore);
 				}
@@ -429,7 +432,8 @@ void vUARTIntHandler(void)
 			{
 				// Update the N value
 				newN = N - 1;
-				if(newN > 0){
+				if (newN > 0)
+				{
 					N = newN;
 					xSemaphoreGive(xFilterSemaphore);
 				}
@@ -457,21 +461,28 @@ static void vPrintTask(void *pvParameters)
 		/* Wait for a message to arrive. */
 		if (xQueueReceive(xPrintQueue, &averageValue, mainLCD_TIMEOUT) == pdTRUE)
 		{
-			// OSRAMStringDraw("Print OK", 1, 1);
-		intToAscii(N, N_ascii, 5);
-		OSRAMClear();
-		OSRAMStringDraw("N= ", 0, 0);
-		OSRAMStringDraw(N_ascii, 0, 1);
-		// Display the image on the OLED display
-		unsigned char yaxis[] = {0xFF,0xFF};
-		OSRAMImageDraw(yaxis, AXIS_START, 0, 1, 2);
 
-		// Eje X
-		uint8_t xaxis[] = {0x00, 0x80};
-		for (int i = AXIS_START+1; i < 96; i++) {
-			OSRAMImageDraw(xaxis, i, 0, 1, 2);
-		}	
+			intToAscii(N, N_ascii, 5);
+			OSRAMClear();
+			OSRAMStringDraw("N= ", 0, 0);
+			OSRAMStringDraw(N_ascii, 0, 1);
+			// Display the image on the OLED display
+			unsigned char yaxis[] = {0xFF, 0xFF};
+			OSRAMImageDraw(yaxis, AXIS_START, 0, 1, 2);
+			uint8_t data[2];
+			displayTemperatureGraph(15, data);
+			
+			// Eje X
+			uint8_t xaxis[] = {0x00, 0x80};
+			for (int i = AXIS_START + 1; i < 96; i++)
+			{
+				OSRAMImageDraw(xaxis, i, 0, 1, 2);
+			}
 
+			// Draw the data
+			
+			OSRAMImageDraw(data, AXIS_START + 5, 0, 1, 2);
+			
 		}
 		else
 		{
@@ -493,42 +504,75 @@ void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
 int customRand(void)
 {
 	uint32_t seed = xTaskGetTickCount();
-    const uint32_t a = 1103515245;  // Multiplier
-    const uint32_t c = 12345;       // Increment
-    const uint32_t m = 2147483648;  // Modulus (2^31)
+	const uint32_t a = 1103515245; // Multiplier
+	const uint32_t c = 12345;	   // Increment
+	const uint32_t m = 2147483648; // Modulus (2^31)
 
-    // Update the seed using the LCG formula: Xn+1 = (a * Xn + c) % m
-    seed = (a * seed + c) % m;
+	// Update the seed using the LCG formula: Xn+1 = (a * Xn + c) % m
+	seed = (a * seed + c) % m;
 
-    // Return the random number between 0 and RAND_MAX
-   	int random = (int)(seed % (2 * RAND_MAX + 1)) - RAND_MAX;
-	return random;	
+	// Return the random number between 0 and RAND_MAX
+	int random = (int)(seed % (2 * RAND_MAX + 1)) - RAND_MAX;
+	return random;
 }
 
-void intToAscii(int num, char* buffer, int bufferSize) {
-    if (num == 0) {
-        buffer[0] = '0';
-        buffer[1] = '\0';
-        return;
-    }
+void intToAscii(int num, char *buffer, int bufferSize)
+{
+	if (num == 0)
+	{
+		buffer[0] = '0';
+		buffer[1] = '\0';
+		return;
+	}
 
-    int i = 0;
-    // Build the ASCII string in reverse order
-    while (num > 0 && i < bufferSize - 1) {
-        int digit = num % 10;
-        buffer[i] = '0' + digit;
-        num /= 10;
-        i++;
-    }
+	int i = 0;
+	// Build the ASCII string in reverse order
+	while (num > 0 && i < bufferSize - 1)
+	{
+		int digit = num % 10;
+		buffer[i] = '0' + digit;
+		num /= 10;
+		i++;
+	}
 
-    // Add the null terminator
-    buffer[i] = '\0';
+	// Add the null terminator
+	buffer[i] = '\0';
 
-    // Reverse the string
-    int length = i;
-    for (int j = 0; j < length / 2; j++) {
-        char temp = buffer[j];
-        buffer[j] = buffer[length - j - 1];
-        buffer[length - j - 1] = temp;
-    }
+	// Reverse the string
+	int length = i;
+	for (int j = 0; j < length / 2; j++)
+	{
+		char temp = buffer[j];
+		buffer[j] = buffer[length - j - 1];
+		buffer[length - j - 1] = temp;
+	}
+}
+
+void displayTemperatureGraph(int temperature, uint8_t graph[2])
+{
+	if (temperature < 10 || temperature > 30)
+	{
+		//TODO
+		return;
+	}
+
+	int pixel = 8 - (temperature % 8); // El valor más bajo de temperatura ocupará el MSB del byte del display
+	
+	uint8_t lowerRow = 0x80; // We set the bit 7 to 1 to graph the x axis.
+	uint8_t upperRow = 0;
+
+	if (temperature < 16)
+	{
+		lowerRow |= (1 << pixel);
+		// por ejemplo 10 -> ocupará el pixel 7 (pero se le resta 1 porque el MSB está ocupado para graficar)
+	}
+	else
+	{
+		upperRow |= (1 << pixel - 1);
+	}
+
+	graph[0] = upperRow;
+	graph[1] = lowerRow;
+
+	return graph;
 }
