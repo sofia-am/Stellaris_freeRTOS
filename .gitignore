@@ -1,2 +1,4 @@
 /gcc
 /.vscode
+.gdb_history
+Makefile
