@@ -139,10 +139,28 @@ static void vSensorTask(void *pvParameters);
  */
 static void vFilterTask(void *pvParameters);
 
+/**
+ * @brief Map temperature to a 2 byte array.
+ * 
+ * @param temp 
+ * @param graph 
+ */
 void intToAscii(int num, char *buffer, int bufferSize);
 
+/**
+ * @brief Generate a random number between -5 and 5.
+ * 
+ * @return int 
+ */
 int customRand(void);
 
+/**
+ * @brief Convert an integer to an ASCII string.
+ * 
+ * @param num 
+ * @param buffer 
+ * @param bufferSize 
+ */
 void displayTemperatureGraph(int temperature, uint8_t graph[2]);
 
 /* String that is transmitted on the UART. */
@@ -159,6 +177,11 @@ uint16_t accum;
 uint8_t random = 0;
 
 int8_t sampledData[MAX_N];
+
+UBaseType_t uxHighWaterMarkSensor;
+UBaseType_t uxHighWaterMarkFilter;
+UBaseType_t uxHighWaterMarkPrint;
+UBaseType_t uxHighWaterMarkUART;
 
 /* The semaphore used to wake the button handler task from within the GPIO
 interrupt handler. */
@@ -256,9 +279,6 @@ static void vCheckTask(void *pvParameters)
 			xErrorOccurred = pdTRUE;
 		}
 
-		/* Send either a pass or fail message.  If an error is found it is
-		never cleared again.  We do not write directly to the LCD, but instead
-		queue a message for display by the print task. */
 		if (xErrorOccurred == pdTRUE)
 		{
 			xQueueSend(xPrintQueue, &pcFailMessage, portMAX_DELAY);
@@ -289,13 +309,15 @@ static void vSensorTask(void *pvParameters)
 		randomTemp = customRand();
 		temperature += randomTemp; 
 
+		uxHighWaterMarkSensor = uxTaskGetStackHighWaterMark(NULL);
+
 		if (xQueueSend(xSensorQueue, &temperature, mainCHECK_DELAY) != pdPASS)
 		{
 			OSRAMClear();
 			OSRAMStringDraw("QUEUE FULL", 0, 0);
 			while (true)
 				;
-		}
+		}		
 	}
 }
 /*-----------------------------------------------------------*/
@@ -359,6 +381,8 @@ static void vFilterTask(void *pvParameters)
 					;
 			}
 		}
+
+		uxHighWaterMarkFilter = uxTaskGetStackHighWaterMark(NULL);
 		xSemaphoreGive(xFilterSemaphore);
 	}
 }
@@ -440,6 +464,8 @@ void vUARTIntHandler(void)
 				}
 			}
 		}
+
+		uxHighWaterMarkUART = uxTaskGetStackHighWaterMark(NULL);
 	}
 }
 /*-----------------------------------------------------------*/
@@ -494,19 +520,11 @@ static void vPrintTask(void *pvParameters)
 		{
 			OSRAMStringDraw("Print FAIL", 1, 1);
 		}
+		
+		uxHighWaterMarkPrint = uxTaskGetStackHighWaterMark(NULL);
 	}
 }
 
-void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
-{
-	/* This function will get called if a task overflows its stack.   If the parameters are corrupt then inspect pxCurrentTCB to find which was the	offending task. */
-	OSRAMClear();
-	OSRAMStringDraw("OVERFLOW", 0, 0);
-	for (;;)
-		;
-}
-
-// Function to generate a pseudo-random number between 0 and RAND_MAX
 int customRand(void)
 {
 	static uint32_t g_seed = 0xDEADBEEF; // Initial seed value
