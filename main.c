@@ -102,8 +102,8 @@ efficient. */
 #define mainQUEUE_SIZE (3)
 #define mainNO_DELAY ((TickType_t)0)
 
-#define MAX_N 15
-#define RAND_MAX 5
+#define MAX_N 15	
+
 #define AXIS_START 15
 /*
  * Configure the processor and peripherals for this demo.
@@ -153,7 +153,11 @@ static volatile char *pcNextChar;
 /* Number of samples taken by the filter */
 static uint8_t N = 1;
 
+
+// VER GENERADOR DE RANDS
+#define RAND_MAX 3
 static int temperature = 20;
+uint16_t accum;
 
 int8_t sampledData[MAX_N];
 
@@ -202,7 +206,7 @@ int main(void)
 	xTaskCreate(vSensorTask, "Sensor", configMINIMAL_STACK_SIZE, NULL, mainSENSOR_TASK_PRIORITY, NULL);
 	xTaskCreate(vFilterTask, "Filter", configMINIMAL_STACK_SIZE, NULL, mainFILTER_TASK_PRIORITY, NULL);
 	xTaskCreate(vUARTIntHandler, "UARTHandler", configMINIMAL_STACK_SIZE, NULL, mainUART_TASK_PRIORITY, NULL);
-
+	
 	/* Start the scheduler. */
 	vTaskStartScheduler();
 
@@ -221,7 +225,7 @@ static void vCheckTask(void *pvParameters)
 	TickType_t xLastExecutionTime;
 	const char *pcPassMessage = "PASS";
 	const char *pcFailMessage = "FAIL";
-
+	
 	/* Initialise xLastExecutionTime so the first call to vTaskDelayUntil()
 	works correctly. */
 	xLastExecutionTime = xTaskGetTickCount();
@@ -281,6 +285,7 @@ static void vSensorTask(void *pvParameters)
 	for (;;)
 	{
 		/* Perform this check every mainSENSOR_DELAY milliseconds. */
+		temperature = 20;
 		vTaskDelayUntil(&xLastExecutionTime, mainSENSOR_DELAY);
 		randomTemp = customRand();
 		temperature += randomTemp; /*
@@ -313,14 +318,12 @@ static void vFilterTask(void *pvParameters)
 			;
 
 		int8_t sampleValue;
-		if (xQueueReceive(xSensorQueue, &sampleValue, 0) == pdTRUE)
-		{ /*
-			 OSRAMClear();
-			 OSRAMStringDraw("filter", 0, 0); */
-			int16_t accum = 0;
+		if (xQueueReceive(xSensorQueue, &sampleValue, mainCHECK_DELAY) == pdTRUE)
+		{ 
+			accum = 0;
 
 			// the first time we'll take the average on the amount of samples that we have or the last N samples
-			if (dataCounter != MAX_N)
+			if (dataCounter < MAX_N)
 			{
 				sampledData[dataCounter] = sampleValue;
 				dataCounter++;
@@ -343,14 +346,14 @@ static void vFilterTask(void *pvParameters)
 
 				sampledData[MAX_N - 1] = sampleValue;
 
-				for (i = MAX_N - N; i < N; i++) // here we take the average on the last N samples
+				for (i = MAX_N - N; i < MAX_N; i++) // here we take the average on the last N samples
 				{
 					accum += sampledData[i];
 				}
 			}
 
 			int8_t average = accum / N;
-			if (xQueueSend(xPrintQueue, &average, mainCHECK_DELAY) != pdPASS)
+			if (xQueueSend(xPrintQueue, &average, portMAX_DELAY) != pdPASS)
 			{
 				OSRAMClear();
 				OSRAMStringDraw("FILTER FAIL", 0, 0);
@@ -448,6 +451,12 @@ void vUARTIntHandler(void)
 static void vPrintTask(void *pvParameters)
 {
 	uint8_t averageValue;
+	uint8_t **image;
+	uint8_t **newImage;
+	uint8_t byteTemp[2];
+	int fullFlag = 0;
+	int displayCounter = AXIS_START+1;
+	int endIndex = 96 - AXIS_START;
 
 	unsigned portBASE_TYPE uxLine = 0, uxRow = 0;
 	TickType_t xLastExecutionTime = xTaskGetTickCount();
@@ -456,33 +465,33 @@ static void vPrintTask(void *pvParameters)
 	for (;;)
 	{
 		vTaskDelayUntil(&xLastExecutionTime, mainFILTER_TIMEOUT);
-		OSRAMClear();
+		//OSRAMClear();
 
 		/* Wait for a message to arrive. */
-		if (xQueueReceive(xPrintQueue, &averageValue, mainLCD_TIMEOUT) == pdTRUE)
-		{
+		
 
-			intToAscii(N, N_ascii, 5);
-			OSRAMClear();
-			OSRAMStringDraw("N= ", 0, 0);
+		if (xQueueReceive(xPrintQueue, &averageValue, portMAX_DELAY) == pdTRUE)
+		{
+			// we get the two byte array to represent the temperature
+			displayTemperatureGraph(averageValue, byteTemp);
+			intToAscii(averageValue, N_ascii, 5);
+			OSRAMStringDraw("t= ", 0, 0);
 			OSRAMStringDraw(N_ascii, 0, 1);
 			// Display the image on the OLED display
 			unsigned char yaxis[] = {0xFF, 0xFF};
 			OSRAMImageDraw(yaxis, AXIS_START, 0, 1, 2);
-			uint8_t data[2];
-			displayTemperatureGraph(15, data);
 			
-			// Eje X
 			uint8_t xaxis[] = {0x00, 0x80};
-			for (int i = AXIS_START + 1; i < 96; i++)
+			OSRAMImageDraw(byteTemp, displayCounter, 0, 1, 2);
+			for (int i = displayCounter + 1; i < 96; i++)
 			{
 				OSRAMImageDraw(xaxis, i, 0, 1, 2);
 			}
-
-			// Draw the data
-			
-			OSRAMImageDraw(data, AXIS_START + 5, 0, 1, 2);
-			
+			if(displayCounter < endIndex)
+				displayCounter++;
+			else{
+				displayCounter = AXIS_START;
+			}
 		}
 		else
 		{
@@ -514,7 +523,7 @@ int customRand(void)
 	// Return the random number between 0 and RAND_MAX
 	int random = (int)(seed % (2 * RAND_MAX + 1)) - RAND_MAX;
 	return random;
-}
+} 
 
 void intToAscii(int num, char *buffer, int bufferSize)
 {
@@ -548,31 +557,33 @@ void intToAscii(int num, char *buffer, int bufferSize)
 	}
 }
 
-void displayTemperatureGraph(int temperature, uint8_t graph[2])
+void displayTemperatureGraph(int temp, uint8_t graph[2])
 {
-	if (temperature < 10 || temperature > 30)
-	{
-		//TODO
+	if (temp > 30){
+		graph[0] = 0x01;
+		graph[1] = 0x80;
+		return;
+	}else if(temp < 10){
+		graph[0] = 0x00;
+		graph[1] = 0x80;
 		return;
 	}
 
-	int pixel = 8 - (temperature % 8); // El valor más bajo de temperatura ocupará el MSB del byte del display
+	int pixel = 7 - (temp % 8); 
+	// Calculated so the value 10 (lowest temp possible) is mapped to pixel 6 of the lowest row.
 	
 	uint8_t lowerRow = 0x80; // We set the bit 7 to 1 to graph the x axis.
 	uint8_t upperRow = 0;
 
-	if (temperature < 16)
+	if (temp < 16)
 	{
 		lowerRow |= (1 << pixel);
-		// por ejemplo 10 -> ocupará el pixel 7 (pero se le resta 1 porque el MSB está ocupado para graficar)
 	}
 	else
 	{
-		upperRow |= (1 << pixel - 1);
+		upperRow |= (1 << pixel + 1); 
 	}
 
 	graph[0] = upperRow;
 	graph[1] = lowerRow;
-
-	return graph;
 }

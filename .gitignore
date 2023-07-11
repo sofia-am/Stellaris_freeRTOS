@@ -2,3 +2,4 @@
 /.vscode
 .gdb_history
 Makefile
+gbd.brk
