@@ -102,9 +102,8 @@ efficient. */
 #define mainQUEUE_SIZE (3)
 #define mainNO_DELAY ((TickType_t)0)
 
-#define MAX_N 15	
-
-#define AXIS_START 15
+#define MAX_N 15
+#define AXIS_START 30
 /*
  * Configure the processor and peripherals for this demo.
  */
@@ -152,7 +151,6 @@ static volatile char *pcNextChar;
 
 /* Number of samples taken by the filter */
 static uint8_t N = 1;
-
 
 // VER GENERADOR DE RANDS
 #define RAND_MAX 3
@@ -207,7 +205,7 @@ int main(void)
 	xTaskCreate(vSensorTask, "Sensor", configMINIMAL_STACK_SIZE, NULL, mainSENSOR_TASK_PRIORITY, NULL);
 	xTaskCreate(vFilterTask, "Filter", configMINIMAL_STACK_SIZE, NULL, mainFILTER_TASK_PRIORITY, NULL);
 	xTaskCreate(vUARTIntHandler, "UARTHandler", configMINIMAL_STACK_SIZE, NULL, mainUART_TASK_PRIORITY, NULL);
-	
+
 	/* Start the scheduler. */
 	vTaskStartScheduler();
 
@@ -226,7 +224,7 @@ static void vCheckTask(void *pvParameters)
 	TickType_t xLastExecutionTime;
 	const char *pcPassMessage = "PASS";
 	const char *pcFailMessage = "FAIL";
-	
+
 	/* Initialise xLastExecutionTime so the first call to vTaskDelayUntil()
 	works correctly. */
 	xLastExecutionTime = xTaskGetTickCount();
@@ -289,9 +287,8 @@ static void vSensorTask(void *pvParameters)
 		temperature = 20;
 		vTaskDelayUntil(&xLastExecutionTime, mainSENSOR_DELAY);
 		randomTemp = customRand();
-		temperature += randomTemp; /*
-		 OSRAMClear();
-		 OSRAMStringDraw("temp", 0, 0); */
+		temperature += randomTemp; 
+
 		if (xQueueSend(xSensorQueue, &temperature, mainCHECK_DELAY) != pdPASS)
 		{
 			OSRAMClear();
@@ -320,7 +317,7 @@ static void vFilterTask(void *pvParameters)
 
 		int8_t sampleValue;
 		if (xQueueReceive(xSensorQueue, &sampleValue, mainCHECK_DELAY) == pdTRUE)
-		{ 
+		{
 			accum = 0;
 
 			// the first time we'll take the average on the amount of samples that we have or the last N samples
@@ -442,8 +439,6 @@ void vUARTIntHandler(void)
 					xSemaphoreGive(xFilterSemaphore);
 				}
 			}
-
-			// OSRAMStringDraw("UART H", 0, 0);
 		}
 	}
 }
@@ -451,25 +446,21 @@ void vUARTIntHandler(void)
 
 static void vPrintTask(void *pvParameters)
 {
+	OSRAMClear();
 	uint8_t averageValue;
-	uint8_t **image;
-	uint8_t **newImage;
 	uint8_t byteTemp[2];
-	int fullFlag = 0;
-	int displayCounter = AXIS_START+1;
+	char *N_ascii[5];
+
+	int displayCounter = AXIS_START + 1;
 	int endIndex = 96 - AXIS_START;
 
-	unsigned portBASE_TYPE uxLine = 0, uxRow = 0;
 	TickType_t xLastExecutionTime = xTaskGetTickCount();
-	char *N_ascii[5];
 
 	for (;;)
 	{
 		vTaskDelayUntil(&xLastExecutionTime, mainFILTER_TIMEOUT);
-		//OSRAMClear();
 
 		/* Wait for a message to arrive. */
-		
 
 		if (xQueueReceive(xPrintQueue, &averageValue, portMAX_DELAY) == pdTRUE)
 		{
@@ -478,20 +469,25 @@ static void vPrintTask(void *pvParameters)
 			intToAscii(averageValue, N_ascii, 5);
 			OSRAMStringDraw("t= ", 0, 0);
 			OSRAMStringDraw(N_ascii, 0, 1);
+			intToAscii(N, N_ascii, 5);
+			OSRAMStringDraw("N=", 15, 0);
+			OSRAMStringDraw(N_ascii, 15, 1);
+
 			// Display the image on the OLED display
 			unsigned char yaxis[] = {0xFF, 0xFF};
 			OSRAMImageDraw(yaxis, AXIS_START, 0, 1, 2);
-			
+
 			uint8_t xaxis[] = {0x00, 0x80};
 			OSRAMImageDraw(byteTemp, displayCounter, 0, 1, 2);
-			for (int i = displayCounter + 1; i < 96; i++)
+			for (int i = displayCounter+1; i < 96; i++)
 			{
 				OSRAMImageDraw(xaxis, i, 0, 1, 2);
 			}
-			if(displayCounter < endIndex)
+			if (displayCounter < endIndex)
 				displayCounter++;
-			else{
-				displayCounter = AXIS_START;
+			else
+			{
+				displayCounter = AXIS_START + 1;
 			}
 		}
 		else
@@ -512,23 +508,16 @@ void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
 
 // Function to generate a pseudo-random number between 0 and RAND_MAX
 int customRand(void)
-/* {
-	random = (uint8_t)xTaskGetTickCount() % 9;
-	if(random % 2 == 0)
-		return random;
-	else
-		return -random;
-} */
 {
-static uint32_t g_seed = 0xDEADBEEF; // Initial seed value
+	static uint32_t g_seed = 0xDEADBEEF; // Initial seed value
 
-    g_seed ^= g_seed << 13;
-    g_seed ^= g_seed >> 17;
-    g_seed ^= g_seed << 5;
-    
-    int32_t random_number = (int32_t)(g_seed % 11) - 5; // Scale and shift the range
-    
-    return random_number;
+	g_seed ^= g_seed << 13;
+	g_seed ^= g_seed >> 17;
+	g_seed ^= g_seed << 5;
+
+	int32_t random_number = (int32_t)(g_seed % 11) - 5; // Scale and shift the range
+
+	return random_number;
 }
 
 void intToAscii(int num, char *buffer, int bufferSize)
@@ -565,19 +554,22 @@ void intToAscii(int num, char *buffer, int bufferSize)
 
 void displayTemperatureGraph(int temp, uint8_t graph[2])
 {
-	if (temp > 23){
+	if (temp > 23)
+	{
 		graph[0] = 0x01;
 		graph[1] = 0x80;
 		return;
-	}else if(temp < 10){
+	}
+	else if (temp < 10)
+	{
 		graph[0] = 0x00;
 		graph[1] = 0x80;
 		return;
 	}
 
-	int pixel = 7 - (temp % 8); 
+	int pixel = 7 - (temp % 8);
 	// Calculated so the value 10 (lowest temp possible) is mapped to pixel 6 of the lowest row.
-	
+
 	uint8_t lowerRow = 0x80; // We set the bit 7 to 1 to graph the x axis.
 	uint8_t upperRow = 0;
 
@@ -587,7 +579,7 @@ void displayTemperatureGraph(int temp, uint8_t graph[2])
 	}
 	else
 	{
-		upperRow |= (1 << pixel); 
+		upperRow |= (1 << pixel);
 	}
 
 	graph[0] = upperRow;
