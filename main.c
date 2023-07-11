@@ -156,8 +156,9 @@ static uint8_t N = 1;
 
 // VER GENERADOR DE RANDS
 #define RAND_MAX 3
-static int temperature = 20;
+static int temperature = 18;
 uint16_t accum;
+uint8_t random = 0;
 
 int8_t sampledData[MAX_N];
 
@@ -511,19 +512,24 @@ void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
 
 // Function to generate a pseudo-random number between 0 and RAND_MAX
 int customRand(void)
+/* {
+	random = (uint8_t)xTaskGetTickCount() % 9;
+	if(random % 2 == 0)
+		return random;
+	else
+		return -random;
+} */
 {
-	uint32_t seed = xTaskGetTickCount();
-	const uint32_t a = 1103515245; // Multiplier
-	const uint32_t c = 12345;	   // Increment
-	const uint32_t m = 2147483648; // Modulus (2^31)
+static uint32_t g_seed = 0xDEADBEEF; // Initial seed value
 
-	// Update the seed using the LCG formula: Xn+1 = (a * Xn + c) % m
-	seed = (a * seed + c) % m;
-
-	// Return the random number between 0 and RAND_MAX
-	int random = (int)(seed % (2 * RAND_MAX + 1)) - RAND_MAX;
-	return random;
-} 
+    g_seed ^= g_seed << 13;
+    g_seed ^= g_seed >> 17;
+    g_seed ^= g_seed << 5;
+    
+    int32_t random_number = (int32_t)(g_seed % 11) - 5; // Scale and shift the range
+    
+    return random_number;
+}
 
 void intToAscii(int num, char *buffer, int bufferSize)
 {
@@ -559,7 +565,7 @@ void intToAscii(int num, char *buffer, int bufferSize)
 
 void displayTemperatureGraph(int temp, uint8_t graph[2])
 {
-	if (temp > 30){
+	if (temp > 23){
 		graph[0] = 0x01;
 		graph[1] = 0x80;
 		return;
@@ -581,7 +587,7 @@ void displayTemperatureGraph(int temp, uint8_t graph[2])
 	}
 	else
 	{
-		upperRow |= (1 << pixel + 1); 
+		upperRow |= (1 << pixel); 
 	}
 
 	graph[0] = upperRow;
