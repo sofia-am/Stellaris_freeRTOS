@@ -241,57 +241,6 @@ int main(void)
 }
 /*-----------------------------------------------------------*/
 
-static void vCheckTask(void *pvParameters)
-{
-	portBASE_TYPE xErrorOccurred = pdFALSE;
-	TickType_t xLastExecutionTime;
-	const char *pcPassMessage = "PASS";
-	const char *pcFailMessage = "FAIL";
-
-	/* Initialise xLastExecutionTime so the first call to vTaskDelayUntil()
-	works correctly. */
-	xLastExecutionTime = xTaskGetTickCount();
-
-	for (;;)
-	{
-		/* Perform this check every mainCHECK_DELAY milliseconds. */
-		vTaskDelayUntil(&xLastExecutionTime, mainCHECK_DELAY);
-
-		/* Has an error been found in any task? */
-
-		if (xAreIntegerMathsTaskStillRunning() != pdTRUE)
-		{
-			xErrorOccurred = pdTRUE;
-		}
-
-		if (xArePollingQueuesStillRunning() != pdTRUE)
-		{
-			xErrorOccurred = pdTRUE;
-		}
-
-		if (xAreSemaphoreTasksStillRunning() != pdTRUE)
-		{
-			xErrorOccurred = pdTRUE;
-		}
-
-		if (xAreBlockingQueuesStillRunning() != pdTRUE)
-		{
-			xErrorOccurred = pdTRUE;
-		}
-
-		if (xErrorOccurred == pdTRUE)
-		{
-			xQueueSend(xPrintQueue, &pcFailMessage, portMAX_DELAY);
-		}
-		else
-		{
-			xQueueSend(xPrintQueue, &pcPassMessage, portMAX_DELAY);
-		}
-	}
-}
-
-/*-----------------------------------------------------------*/
-
 static void vSensorTask(void *pvParameters)
 {
 	TickType_t xLastExecutionTime;
@@ -509,7 +458,7 @@ static void vPrintTask(void *pvParameters)
 			{
 				OSRAMImageDraw(xaxis, i, 0, 1, 2);
 			}
-			if (displayCounter < endIndex)
+			if (displayCounter < 96)
 				displayCounter++;
 			else
 			{
