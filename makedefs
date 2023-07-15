@@ -75,7 +75,7 @@ AFLAGS=-mthumb         \
 CFLAGS=-mthumb         \
        -mcpu=cortex-m3 \
        -O2             \
-       -MD
+       -MD			   \
 
 #
 # The command for calling the library archiver.
