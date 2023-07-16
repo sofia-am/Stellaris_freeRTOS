@@ -85,7 +85,7 @@
 
 /* Delay between cycles of the 'check' task. */
 #define mainCHECK_DELAY ((TickType_t)5000 / portTICK_PERIOD_MS)
-#define mainTOP_DELAY ((TickType_t)2000 / portTICK_PERIOD_MS)
+#define mainTOP_DELAY ((TickType_t)3000 / portTICK_PERIOD_MS)
 
 /* Delay between cycles of the 'sensor' task. (10 Hz -> 0,1 seg)*/
 #define mainSENSOR_DELAY ((TickType_t)100 / portTICK_PERIOD_MS)
@@ -172,7 +172,7 @@ void vTopLikeTask(char *pvParameters);
 
 void vTaskGetStats(signed char *pcWriteBuffer);
 
-char* longToChar(unsigned long value, char *ptr, int base) ;
+char *longToChar(unsigned long value, char *ptr, int base);
 
 static volatile char *pcNextChar;
 
@@ -347,8 +347,8 @@ static void vFilterTask(void *pvParameters)
 		xSemaphoreGive(xFilterSemaphore);
 	}
 }
-
 /*-----------------------------------------------------------*/
+
 static void prvSetupHardware(void)
 {
 	/* Setup the PLL. */
@@ -385,6 +385,7 @@ void vUART_ISR(void)
 
 	xSemaphoreGiveFromISR(xUARTSemaphore, &xHigherPriorityTaskWoken);
 }
+/*-----------------------------------------------------------*/
 
 /* The UART interrupt handler is triggered whenever new data is received, allowing the program to receive and process data in real-time without stopping or blocking. */
 void vUARTIntHandler(void)
@@ -485,6 +486,7 @@ static void vPrintTask(void *pvParameters)
 		uxHighWaterMarkPrint = uxTaskGetStackHighWaterMark(NULL);
 	}
 }
+/*-----------------------------------------------------------*/
 
 void vTopLikeTask(char *pvParameters)
 {
@@ -501,7 +503,6 @@ void vTopLikeTask(char *pvParameters)
 
 void vTaskGetStats(signed char *pcWriteBuffer)
 {
-
 	TaskStatus_t *pxTaskStatusArray;
 	volatile UBaseType_t uxArraySize, x;
 	unsigned long ulTotalRunTime, ulStatsAsPercentage;
@@ -512,7 +513,7 @@ void vTaskGetStats(signed char *pcWriteBuffer)
 
 	char buffer[10];
 	uint32_t ulRunTimeCounter;
-	
+
 	/* Make sure the write buffer does not contain a string. */
 	*pcWriteBuffer = 0x00;
 
@@ -523,11 +524,12 @@ void vTaskGetStats(signed char *pcWriteBuffer)
 	/* Allocate a TaskStatus_t structure for each task.  An array could be
 	allocated statically at compile time. */
 	pxTaskStatusArray = pvPortMalloc(uxArraySize * sizeof(TaskStatus_t));
-	printViaUART("\nTask		Time		Percentage\n");
-	printViaUART("******************************************\n");
 
 	if (pxTaskStatusArray != NULL)
 	{
+		printViaUART("\nTask		Time		Percentage	StackHighWatermark\n");
+		printViaUART("******************************************************************\n");
+
 		/* Generate raw status information about each task. */
 		uxArraySize = uxTaskGetSystemState(pxTaskStatusArray,
 										   uxArraySize,
@@ -553,15 +555,14 @@ void vTaskGetStats(signed char *pcWriteBuffer)
 				{
 					taskName = pxTaskStatusArray[x].pcTaskName;
 					ulRunTimeCounter = pxTaskStatusArray[x].ulRunTimeCounter;
-/* 					intToAscii(ulRunTimeCounter, taskTime, sizeof(ulRunTimeCounter));
-					intToAscii(ulStatsAsPercentage, taskPercentage, sizeof(ulStatsAsPercentage));
- */
 					printViaUART(taskName);
 					printViaUART("\t\t");
 					printViaUART(longToChar(ulRunTimeCounter, buffer, 10));
 					printViaUART("\t\t");
-					printViaUART(longToChar(ulStatsAsPercentage, buffer ,10));
-					printViaUART("%\r\n");
+					printViaUART(longToChar(ulStatsAsPercentage, buffer, 10));
+					printViaUART("%\t\t");
+					printViaUART(longToChar(uxTaskGetStackHighWaterMark(pxTaskStatusArray[x].xHandle), buffer, 10));
+					printViaUART("\r\n");
 				}
 				else
 				{
@@ -569,70 +570,72 @@ void vTaskGetStats(signed char *pcWriteBuffer)
 					consumed less than 1% of the total run time. */
 					taskName = pxTaskStatusArray[x].pcTaskName;
 					ulRunTimeCounter = pxTaskStatusArray[x].ulRunTimeCounter;
-					
-					//intToAscii(ulRunTimeCounter, taskTime, 100);
-					
+
 					printViaUART(taskName);
 					printViaUART("\t\t");
-					if(ulRunTimeCounter == 0)
-					{
-						taskTime = "0";
-					}
-					else
-					{
-						taskTime = longToChar(ulRunTimeCounter,  buffer ,10);
-					}
+					taskTime = longToChar(ulRunTimeCounter, buffer, 10);
 					printViaUART(taskTime);
 					printViaUART("\t\t");
-					printViaUART("<1%\r\n");
-
+					printViaUART("<1%\t\t");
+					printViaUART(longToChar(uxTaskGetStackHighWaterMark(pxTaskStatusArray[x].xHandle), buffer, 10));
+					printViaUART("\r\n");
 				}
 
 				pcWriteBuffer += strlen((char *)pcWriteBuffer);
 			}
-		}
-
-		/* The array is no longer needed, free the memory it consumes. */
-		vPortFree(pxTaskStatusArray);
+		}		
 	}
+	else
+	{
+		printViaUART("Struct pxTaskStatusArray NULL\n");
+	}
+	/* The array is no longer needed, free the memory it consumes. */
+		vPortFree(pxTaskStatusArray);
 }
 
-char* longToChar(unsigned long value, char *ptr, int base) {
+char *longToChar(unsigned long value, char *ptr, int base)
+{
 
 	unsigned long t = 0, res = 0;
 	unsigned long tmp = value;
 	int count = 0;
 
-	if (NULL == ptr) {
-	return NULL;
+	if (NULL == ptr)
+	{
+		return NULL;
 	}
 
-	if (tmp == 0) {
-	count++;
+	if (tmp == 0)
+	{
+		count++;
 	}
 
-	while(tmp > 0) {
-	tmp = tmp/base;
-	count++;
+	while (tmp > 0)
+	{
+		tmp = tmp / base;
+		count++;
 	}
 
 	ptr += count;
 
 	*ptr = '\0';
 
-	do {
+	do
+	{
 
-	res = value - base * (t = value / base);
-	if (res < 10) {
-		* -- ptr = '0' + res;
-	}
-	else if ((res >= 10) && (res < 16)) {
-		* --ptr = 'A' - 10 + res;
-	}
+		res = value - base * (t = value / base);
+		if (res < 10)
+		{
+			*--ptr = '0' + res;
+		}
+		else if ((res >= 10) && (res < 16))
+		{
+			*--ptr = 'A' - 10 + res;
+		}
 
 	} while ((value = t) != 0);
 
-	return(ptr);
+	return (ptr);
 }
 
 int customRand(void)
