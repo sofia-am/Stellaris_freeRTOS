@@ -85,7 +85,7 @@
 
 /* Delay between cycles of the 'check' task. */
 #define mainCHECK_DELAY ((TickType_t)5000 / portTICK_PERIOD_MS)
-#define mainTOP_DELAY ((TickType_t)3000 / portTICK_PERIOD_MS)
+#define mainTOP_DELAY ((TickType_t)2000/ portTICK_PERIOD_MS)
 
 /* Delay between cycles of the 'sensor' task. (10 Hz -> 0,1 seg)*/
 #define mainSENSOR_DELAY ((TickType_t)100 / portTICK_PERIOD_MS)
@@ -205,7 +205,7 @@ QueueHandle_t xPrintQueue;
 /* The queue used to send temperature data to the filter. */
 QueueHandle_t xSensorQueue;
 
-unsigned long ulHighFrequencyTimerTicks;
+static uint32_t g_seed = 0xDEADBEEF; // Initial seed value
 
 /*-----------------------------------------------------------*/
 
@@ -562,7 +562,7 @@ void vTaskGetStats(signed char *pcWriteBuffer)
 					printViaUART(longToChar(ulStatsAsPercentage, buffer, 10));
 					printViaUART("%\t\t");
 					printViaUART(longToChar(uxTaskGetStackHighWaterMark(pxTaskStatusArray[x].xHandle), buffer, 10));
-					printViaUART("\r\n");
+					printViaUART(" words\r\n");	
 				}
 				else
 				{
@@ -578,7 +578,7 @@ void vTaskGetStats(signed char *pcWriteBuffer)
 					printViaUART("\t\t");
 					printViaUART("<1%\t\t");
 					printViaUART(longToChar(uxTaskGetStackHighWaterMark(pxTaskStatusArray[x].xHandle), buffer, 10));
-					printViaUART("\r\n");
+					printViaUART(" words\r\n");
 				}
 
 				pcWriteBuffer += strlen((char *)pcWriteBuffer);
@@ -640,8 +640,6 @@ char *longToChar(unsigned long value, char *ptr, int base)
 
 int customRand(void)
 {
-	static uint32_t g_seed = 0xDEADBEEF; // Initial seed value
-
 	g_seed ^= g_seed << 13;
 	g_seed ^= g_seed >> 17;
 	g_seed ^= g_seed << 5;

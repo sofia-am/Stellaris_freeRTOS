@@ -61,7 +61,7 @@
 /*The run time statistics time base needs to have a higher resolution than the tick interrupt - otherwise the statistics may be too inaccurate to be truly useful. It is recommended to make the time base between 10 and 100 times faster than the tick interrupt. The faster the time base the more accurate the statistics will be - but also the sooner the timer value will overflow. */
 #define portCONFIGURE_TIMER_FOR_RUN_TIME_STATS()    ( 0UL )
 /* This macro should just return the current 'time', as configured by portCONFIGURE_TIMER_FOR_RUN_TIME_STATS(). Again some examples are provided below. */
-#define portGET_RUN_TIME_COUNTER_VALUE()            (xTaskGetTickCount()*10)
+#define portGET_RUN_TIME_COUNTER_VALUE()            (xTaskGetTickCount())
 
 /* Set the following definitions to 1 to include the API function, or zero
 to exclude the API function. */
