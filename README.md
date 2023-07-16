@@ -78,6 +78,7 @@ El display es de 16x96, lo que significa que posee 2 bits de alto, en los cuales
 Esto se hace para cada valor medido, y se grafica además el resto de los bits del eje x.
 
 Una vez que se completa el gráfico, éste se borra y se arranca de nuevo.
+![Display](images/displayRTOS.png)
 
 ### 4. Recepción de Caracteres via UART
 Para esta tarea se hace uso de las interrupciones disponibles via UART. Se habilita el pin Rx, y cuando se genera una interrupción, el handler lo que hace es intentar tomar un semáforo que va a resguardar el recurso N, para que no sea leído por la tarea del filtro mientras éste se modifica.
