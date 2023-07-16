@@ -76,6 +76,8 @@
 #include "semtest.h"
 #include "BlockQ.h"
 
+#include <string.h>
+
 #define mainQUEUE_TIMEOUT 3000
 #define mainFILTER_TIMEOUT 1000
 #define mainLCD_TIMEOUT 1000
@@ -83,6 +85,7 @@
 
 /* Delay between cycles of the 'check' task. */
 #define mainCHECK_DELAY ((TickType_t)5000 / portTICK_PERIOD_MS)
+#define mainTOP_DELAY ((TickType_t)2000 / portTICK_PERIOD_MS)
 
 /* Delay between cycles of the 'sensor' task. (10 Hz -> 0,1 seg)*/
 #define mainSENSOR_DELAY ((TickType_t)100 / portTICK_PERIOD_MS)
@@ -104,6 +107,7 @@ efficient. */
 
 #define MAX_N 15
 #define AXIS_START 30
+
 /*
  * Configure the processor and peripherals for this demo.
  */
@@ -130,28 +134,45 @@ static void vFilterTask(void *pvParameters);
 
 /**
  * @brief Map temperature to a 2 byte array.
- * 
- * @param temp 
- * @param graph 
+ *
+ * @param temp
+ * @param graph
  */
 void intToAscii(int num, char *buffer, int bufferSize);
 
 /**
  * @brief Generate a random number between -5 and 5.
- * 
- * @return int 
+ *
+ * @return int
  */
 int customRand(void);
 
 /**
  * @brief Convert an integer to an ASCII string.
- * 
- * @param num 
- * @param buffer 
- * @param bufferSize 
+ *
+ * @param num
+ * @param buffer
+ * @param bufferSize
  */
 void displayTemperatureGraph(int temperature, uint8_t graph[2]);
 
+/**
+ * @brief Print a string via UART.
+ *
+ * @param string
+ */
+void printViaUART(char *string);
+
+/**
+ * @brief Task that prints information about the CPU's usage like the top program.
+ *
+ * @param pvParameters
+ */
+void vTopLikeTask(char *pvParameters);
+
+void vTaskGetStats(signed char *pcWriteBuffer);
+
+char* longToChar(unsigned long value, char *ptr, int base) ;
 
 static volatile char *pcNextChar;
 
@@ -184,6 +205,8 @@ QueueHandle_t xPrintQueue;
 /* The queue used to send temperature data to the filter. */
 QueueHandle_t xSensorQueue;
 
+unsigned long ulHighFrequencyTimerTicks;
+
 /*-----------------------------------------------------------*/
 
 int main(void)
@@ -215,7 +238,8 @@ int main(void)
 	xTaskCreate(vPrintTask, "Print", configMINIMAL_STACK_SIZE, NULL, mainDISPLAY_TASK_PRIORITY, NULL);
 	xTaskCreate(vSensorTask, "Sensor", configMINIMAL_STACK_SIZE, NULL, mainSENSOR_TASK_PRIORITY, NULL);
 	xTaskCreate(vFilterTask, "Filter", configMINIMAL_STACK_SIZE, NULL, mainFILTER_TASK_PRIORITY, NULL);
-	xTaskCreate(vUARTIntHandler, "UARTHandler", configMINIMAL_STACK_SIZE, NULL, mainUART_TASK_PRIORITY, NULL);
+	xTaskCreate(vUARTIntHandler, "UART", configMINIMAL_STACK_SIZE, NULL, mainUART_TASK_PRIORITY, NULL);
+	xTaskCreate(vTopLikeTask, "Top", configMINIMAL_STACK_SIZE, NULL, mainDISPLAY_TASK_PRIORITY - 1, NULL);
 
 	/* Start the scheduler. */
 	vTaskStartScheduler();
@@ -244,7 +268,7 @@ static void vSensorTask(void *pvParameters)
 		temperature = 20;
 		vTaskDelayUntil(&xLastExecutionTime, mainSENSOR_DELAY);
 		randomTemp = customRand();
-		temperature += randomTemp; 
+		temperature += randomTemp;
 
 		uxHighWaterMarkSensor = uxTaskGetStackHighWaterMark(NULL);
 
@@ -254,7 +278,7 @@ static void vSensorTask(void *pvParameters)
 			OSRAMStringDraw("QUEUE FULL", 0, 0);
 			while (true)
 				;
-		}		
+		}
 	}
 }
 /*-----------------------------------------------------------*/
@@ -442,7 +466,7 @@ static void vPrintTask(void *pvParameters)
 
 			uint8_t xaxis[] = {0x00, 0x80};
 			OSRAMImageDraw(byteTemp, displayCounter, 0, 1, 2);
-			for (int i = displayCounter+1; i < 96; i++)
+			for (int i = displayCounter + 1; i < 96; i++)
 			{
 				OSRAMImageDraw(xaxis, i, 0, 1, 2);
 			}
@@ -457,9 +481,158 @@ static void vPrintTask(void *pvParameters)
 		{
 			OSRAMStringDraw("Print FAIL", 1, 1);
 		}
-		
+
 		uxHighWaterMarkPrint = uxTaskGetStackHighWaterMark(NULL);
 	}
+}
+
+void vTopLikeTask(char *pvParameters)
+{
+	TickType_t xLastExecutionTime = xTaskGetTickCount();
+	char *pcWriteBuffer;
+	for (;;)
+	{
+		vTaskDelayUntil(&xLastExecutionTime, mainTOP_DELAY);
+		vTaskGetStats(pcWriteBuffer);
+	}
+}
+
+/*------------------------- Utilities --------------------------------*/
+
+void vTaskGetStats(signed char *pcWriteBuffer)
+{
+
+	TaskStatus_t *pxTaskStatusArray;
+	volatile UBaseType_t uxArraySize, x;
+	unsigned long ulTotalRunTime, ulStatsAsPercentage;
+
+	char *taskName;
+	char *taskTime;
+	char *taskPercentage;
+
+	char buffer[10];
+	uint32_t ulRunTimeCounter;
+	
+	/* Make sure the write buffer does not contain a string. */
+	*pcWriteBuffer = 0x00;
+
+	/* Take a snapshot of the number of tasks in case it changes while this
+	function is executing. */
+	uxArraySize = uxTaskGetNumberOfTasks();
+
+	/* Allocate a TaskStatus_t structure for each task.  An array could be
+	allocated statically at compile time. */
+	pxTaskStatusArray = pvPortMalloc(uxArraySize * sizeof(TaskStatus_t));
+	printViaUART("\nTask		Time		Percentage\n");
+	printViaUART("******************************************\n");
+
+	if (pxTaskStatusArray != NULL)
+	{
+		/* Generate raw status information about each task. */
+		uxArraySize = uxTaskGetSystemState(pxTaskStatusArray,
+										   uxArraySize,
+										   &ulTotalRunTime);
+
+		/* For percentage calculations. */
+		ulTotalRunTime /= 100UL;
+
+		/* Avoid divide by zero errors. */
+		if (ulTotalRunTime > 0)
+		{
+			/* For each populated position in the pxTaskStatusArray array,
+			format the raw data as human readable ASCII data. */
+			for (x = 0; x < uxArraySize; x++)
+			{
+				/* What percentage of the total run time has the task used?
+				This will always be rounded down to the nearest integer.
+				ulTotalRunTimeDiv100 has already been divided by 100. */
+				ulStatsAsPercentage =
+					pxTaskStatusArray[x].ulRunTimeCounter / ulTotalRunTime;
+
+				if (ulStatsAsPercentage > 0UL)
+				{
+					taskName = pxTaskStatusArray[x].pcTaskName;
+					ulRunTimeCounter = pxTaskStatusArray[x].ulRunTimeCounter;
+/* 					intToAscii(ulRunTimeCounter, taskTime, sizeof(ulRunTimeCounter));
+					intToAscii(ulStatsAsPercentage, taskPercentage, sizeof(ulStatsAsPercentage));
+ */
+					printViaUART(taskName);
+					printViaUART("\t\t");
+					printViaUART(longToChar(ulRunTimeCounter, buffer, 10));
+					printViaUART("\t\t");
+					printViaUART(longToChar(ulStatsAsPercentage, buffer ,10));
+					printViaUART("%\r\n");
+				}
+				else
+				{
+					/* If the percentage is zero here then the task has
+					consumed less than 1% of the total run time. */
+					taskName = pxTaskStatusArray[x].pcTaskName;
+					ulRunTimeCounter = pxTaskStatusArray[x].ulRunTimeCounter;
+					
+					//intToAscii(ulRunTimeCounter, taskTime, 100);
+					
+					printViaUART(taskName);
+					printViaUART("\t\t");
+					if(ulRunTimeCounter == 0)
+					{
+						taskTime = "0";
+					}
+					else
+					{
+						taskTime = longToChar(ulRunTimeCounter,  buffer ,10);
+					}
+					printViaUART(taskTime);
+					printViaUART("\t\t");
+					printViaUART("<1%\r\n");
+
+				}
+
+				pcWriteBuffer += strlen((char *)pcWriteBuffer);
+			}
+		}
+
+		/* The array is no longer needed, free the memory it consumes. */
+		vPortFree(pxTaskStatusArray);
+	}
+}
+
+char* longToChar(unsigned long value, char *ptr, int base) {
+
+	unsigned long t = 0, res = 0;
+	unsigned long tmp = value;
+	int count = 0;
+
+	if (NULL == ptr) {
+	return NULL;
+	}
+
+	if (tmp == 0) {
+	count++;
+	}
+
+	while(tmp > 0) {
+	tmp = tmp/base;
+	count++;
+	}
+
+	ptr += count;
+
+	*ptr = '\0';
+
+	do {
+
+	res = value - base * (t = value / base);
+	if (res < 10) {
+		* -- ptr = '0' + res;
+	}
+	else if ((res >= 10) && (res < 16)) {
+		* --ptr = 'A' - 10 + res;
+	}
+
+	} while ((value = t) != 0);
+
+	return(ptr);
 }
 
 int customRand(void)
@@ -539,4 +712,13 @@ void displayTemperatureGraph(int temp, uint8_t graph[2])
 
 	graph[0] = upperRow;
 	graph[1] = lowerRow;
+}
+
+void printViaUART(char *string)
+{
+	while (*string != '\0')
+	{
+		UARTCharPut(UART0_BASE, *string);
+		string++;
+	}
 }

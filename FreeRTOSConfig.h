@@ -47,11 +47,21 @@
 #define configMINIMAL_STACK_SIZE	        ( ( unsigned short ) 70 )
 #define configTOTAL_HEAP_SIZE		        ( ( size_t ) ( 7000 ) )
 #define configMAX_TASK_NAME_LEN		        ( 10 )
-#define configUSE_TRACE_FACILITY	        0
+#define configUSE_TRACE_FACILITY	        1
 #define configUSE_16_BIT_TICKS		        0
 #define configIDLE_SHOULD_YIELD		        0
 
 #define configMAX_PRIORITIES		( 5 )
+
+#define configSUPPORT_DYNAMIC_ALLOCATION            1
+
+
+/* Collection of run time statistics is enabled by #defining configGENERATE_RUN_TIME_STATS as 1. Once this has been set the other two macros must also be defined to achieve a successful compilation.*/
+#define configGENERATE_RUN_TIME_STATS   1
+/*The run time statistics time base needs to have a higher resolution than the tick interrupt - otherwise the statistics may be too inaccurate to be truly useful. It is recommended to make the time base between 10 and 100 times faster than the tick interrupt. The faster the time base the more accurate the statistics will be - but also the sooner the timer value will overflow. */
+#define portCONFIGURE_TIMER_FOR_RUN_TIME_STATS()    ( 0UL )
+/* This macro should just return the current 'time', as configured by portCONFIGURE_TIMER_FOR_RUN_TIME_STATS(). Again some examples are provided below. */
+#define portGET_RUN_TIME_COUNTER_VALUE()            (xTaskGetTickCount()*10)
 
 /* Set the following definitions to 1 to include the API function, or zero
 to exclude the API function. */
