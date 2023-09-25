@@ -1,18 +1,3 @@
-# Introducción
-Toda aplicación de ingenierı́a que posea requerimientos rigurosos de tiempo, y que esté controlado por un sistema de computación, utiliza un Sistema Operativo de Tiempo Real (RTOS, por sus siglas en inglés). Una de las caracterı́sticas principales de este tipo de SO, es su capacidad de poseer un kernel preemtive y un scheduler altamente configurable. Numerosas aplicaciones utilizan este tipo de sistemas tales como aviónica, radares, satélites, etc. lo que genera un gran interés del mercado por ingenieros especializados en esta área.
-
-# Objetivo
-El objetivo del presente trabajo práctico es que el estudiante sea capaz de diseñar, crear, comprobar y validar una aplicación de tiempo real sobre un RTOS.
-
-# Desarrollo
-## Tareas
-Se pide que, utilizando qemu, emulando un sistema Stellaris LM3S811, se desarrolle una aplicación basada en FreeRTOS que contenga las siguientes caracterı́sticas:
-1. Una tarea que simule un sensor de temperatura. Generando valores aleatorios, con una frecuencia de 10 Hz.
-2. Una tarea que reciba los valores del sensor y aplique un filtro pasa bajos, donde cada valor resultante es el promedio de las ultimas N mediciones.
-3. Una tarea que grafica en el display los valores de temperatura en el tiempo.
-4. Se debe poder recibir comandos por la interfaz UART para cambiar el N del filtro.
-5. Calcular el stack necesario para cada task. Realizar el análisis utilizando uxTaskGetStackHighWaterMark o vApplicationStackOverflowHook.
-6. Implementar una tarea tipo top de linux, que muestre periódicamente estadı́sticas de las tareas (uso de cpu, uso de memoria, etc).
 
 ### 1. Sensor de Temperatura
 Para gran parte del trabajo se utilizó como template el ejemplo de código para la placa mencionada. 
